@@ -15,8 +15,8 @@ ORIGINAL_IMAGE_FOLDER = "images/original"
 pytesseract.tesseract_cmd = r'C:\Users\Isaac\Downloads\jTessBoxEditor-2.2.0\jTessBoxEditor\tesseract-ocr\tesseract.exe'
 
 def getCircles():
-    original_img = cv2.imread("images/tokens2.jpg")
-    original_img1 = cv2.imread("images/tokens2.jpg",0)
+    original_img = cv2.imread("images/tokens3.jpg")
+    original_img1 = cv2.imread("images/tokens3.jpg",0)
     blurred_image = cv2.GaussianBlur(original_img, (9,9), 0)
     
     # Convert the image to grayscale for processing
@@ -29,11 +29,12 @@ def getCircles():
     
     mask = np.zeros((height,width), np.uint8)    
     loop = True
-    
+
     while loop:
         
         circles = cv2.HoughCircles(gray_image, cv2.HOUGH_GRADIENT, 1, 20, param1=100,
-                                    param2=20, minRadius=110, maxRadius=120)        
+                                    param2=20, minRadius=110, maxRadius=120)    
+        print(circles)
         
         if circles is not None:
             circles = np.uint16(np.around(circles))
