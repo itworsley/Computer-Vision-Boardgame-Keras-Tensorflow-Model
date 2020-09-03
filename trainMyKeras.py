@@ -7,12 +7,17 @@ from keras.layers import Activation, Dropout, Flatten, Dense
 from keras import backend as K 
 from keras.models import load_model
 from keras.utils import to_categorical
+from keras import applications
+from keras.backend.tensorflow_backend import set_session
+import tensorflow as tf
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import os
+import string
+import shutil
   
-  
+model_name = "model.h5"  
 img_width, img_height = 60, 60
 
 train_data_dir = 'train_data/train'
@@ -22,28 +27,46 @@ deleted_data_dir = 'train_data/deleted'
 
 num_classes = 4
 
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
+config.log_device_placement = True  # to log device placement (on which device the operation ran)
+sess = tf.Session(config=config)
+set_session(sess)  # set this TensorFlow session as the default session for Keras
+
 def resizeImages():
-    currentDirectory = sample_data_dir
+    currentDirectory = validation_data_dir + "/c"
+    tempDirectory = currentDirectory + "/temp"
+    if not os.path.exists(tempDirectory):
+        os.mkdir(tempDirectory)
+    
+    numFilesReWrote = 0    
     for i, filename in enumerate(os.listdir(currentDirectory)):
-        img = cv2.imread("{}/{}".format(currentDirectory,filename))
-        #os.remove("{}/{}".format(currentDirectory,filename))
-        res = cv2.resize(img, (img_width, img_height), interpolation=cv2.INTER_AREA)
-        cv2.imwrite("{}/{}.jpg".format(currentDirectory, i+1), res)
+        if (filename.endswith(".jpg")):
+            img = cv2.imread("{}/{}".format(currentDirectory,filename))
+            os.remove("{}/{}".format(currentDirectory,filename))
+            res = cv2.resize(img, (img_width, img_height), interpolation=cv2.INTER_AREA)
+            cv2.imwrite("{}/{}.jpg".format(tempDirectory, i+1), res)
+            numFilesRewrote += 1
+    
+    
+    for file in os.listdir(tempDirectory):
+        shutil.move("{}/{}".format(tempDirectory, file), currentDirectory)
         
+    os.rmdir(tempDirectory)
     print("\n" + "*"*50)
-    print("Rewrote files in {}".format(currentDirectory))
+    print("Rewrote {} files in {}".format(numFilesReWrote, currentDirectory))
   
 def trainKeras():  
-    nb_train_samples = 1050 
-    nb_validation_samples = 90
+    nb_train_samples = num_classes * 350 
+    nb_validation_samples = num_classes * 35
     epochs = 20
     batch_size = 16
     
       
     model = createModel()
       
-    model.compile(loss ='binary_crossentropy', 
-                         optimizer ='rmsprop', 
+    model.compile(loss ='categorical_crossentropy', 
+                         optimizer ='adam', 
                        metrics =['accuracy']) 
       
     train_datagen = ImageDataGenerator( 
@@ -68,7 +91,7 @@ def trainKeras():
         epochs = epochs, validation_data = validation_generator, 
         validation_steps = nb_validation_samples // batch_size) 
       
-    model.save_weights('keras_model.h5') 
+    model.save_weights(model_name) 
     
     
 def createModel():
@@ -78,6 +101,7 @@ def createModel():
         input_shape = (img_width, img_height, 3) 
         
     model = Sequential() 
+    
     
     model.add(Conv2D(32, (3, 3), input_shape = input_shape)) 
     model.add(Activation('relu')) 
@@ -90,69 +114,79 @@ def createModel():
     model.add(Conv2D(64, (3, 3))) 
     model.add(Activation('relu')) 
     model.add(MaxPooling2D(pool_size =(2, 2))) 
+    
       
     model.add(Flatten()) 
-    model.add(Dense(64)) 
-    model.add(Activation('relu')) 
+    model.add(Dense(64, activation='relu')) 
     model.add(Dropout(0.5)) 
     model.add(Dense(num_classes)) 
     model.add(Activation('softmax')) 
+    
+    ## Creating a Sequential model
+    #model= Sequential()
+    #model.add(Conv2D(kernel_size=(3,3), filters=32, activation='tanh', input_shape=input_shape))
+    #model.add(Conv2D(filters=30,kernel_size = (3,3),activation='tanh'))
+    #model.add(MaxPooling2D(pool_size = (2,2)))
+    #model.add(Conv2D(filters=30,kernel_size = (3,3),activation='tanh'))
+    #model.add(MaxPooling2D(pool_size = (2,2)))
+    #model.add(Conv2D(filters=30,kernel_size = (3,3),activation='tanh'))
+    
+    
+    #model.add(Flatten())
+    
+    #model.add(Dense(20,activation='relu'))
+    #model.add(Dense(15,activation='relu'))
+    #model.add(Dense(num_classes,activation = 'softmax'))
+    #model = Sequential()
+    #model.add(Flatten(input_shape=input_shape))
+    #model.add(Dense(256, activation='relu'))
+    #model.add(Dropout(0.5))
+    #model.add(Dense(num_classes, activation='softmax'))    
+    #print(model.summary())
     return model
 
 def loadSamples():
     images = []
     for file in os.listdir(sample_data_dir):
         img = image.load_img('{}/{}'.format(sample_data_dir, file), target_size=(img_width, img_height))
-        #plt.imshow(img)
-        #plt.show()
         img = image.img_to_array(img)
+        img = img / 255
         img = np.expand_dims(img, axis=0)
         images.append(img)
     return images
     
 
 def predictKeras():
-    model = createModel()
-    model.load_weights('keras_model.h5')
-    
-    model.compile(loss='binary_crossentropy',
-                  optimizer='rmsprop',
-                  metrics=['accuracy'])    
-
-    #img = image.load_img('train_data/test/a/1.jpg', target_size=(img_width, img_height))
-    #a = image.img_to_array(img)
-    #a = np.expand_dims(a, axis=0)
-    
-    #img = image.load_img('train_data/test/c/1.jpg', target_size=(img_width, img_height))
-    #b = image.img_to_array(img)
-    #b = np.expand_dims(b, axis=0)    
-    
     images = loadSamples()
-    #images = np.asarray(images)
-    #print(len(images))
+    model = applications.VGG16(include_top=False, weights='imagenet')
+    bottleneck_prediction = model.predict(images[0])
+    print(bottleneck_prediction)
     
-    images = np.vstack(images)
-    classes = model.predict_classes(images, batch_size=10)
+    model = createModel()
+    
+    model.load_weights(model_name)
+    
+    #model.compile(loss='categorical_crossentropy',
+                  #optimizer='adam',
+                  #metrics=['accuracy'])    
+    
+    
+    ##images = np.vstack(images)
+    
+    classes = model.predict_classes(bottleneck_prediction)
     print(classes)
-    #class_names = ["a", "b", "c", "d"]
-    #train_labels = to_categorical(train_labels, num_classes)
-    #print(train_labels)
+    probabilities = model.predict_proba(bottleneck_prediction)
+    #alphabet = dict(zip(range(0,18), string.ascii_lowercase[:18]))
+    alphabet = dict()
+    alphabet[0] = "a"
+    alphabet[1] = "b"
+    alphabet[2] = "c"
+    alphabet[3] = "d"
     
-    #predictions = model.predict(images)
-    #print(predictions)
-    
-    #classes = np.argmax(predictions, axis = 1)
-    #print(classes)    
-    
-    
-    #classesValues = dict()
-    #classesValues["0"] = "a"
-    #classesValues["1"] = "c"
-    
-    ## Print the classes.
-    #for val in classes:
-        #print(classesValues[str(val[0])])
+    # Print the classes.
+    for val in classes:
+        print(alphabet[int(val)])
     
 #trainKeras()
-#predictKeras()
+predictKeras()
 #resizeImages()

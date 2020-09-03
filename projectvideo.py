@@ -4,20 +4,25 @@ Author: Isaac Worsley
 Status: Development
 """
 
+import os
 import cv2
 import math
 import collections
 import numpy as np
-from pytesseract import *
+#from pytesseract import *
 from PIL import Image
+import time
+from train import predict
+
 
 ORIGINAL_IMAGE_FOLDER = "images/original"
 
 alphabet = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r']
 currentIndex = 0
 
-pytesseract.tesseract_cmd = r'C:\Users\Isaac\Downloads\jTessBoxEditor-2.2.0\jTessBoxEditor\tesseract-ocr\tesseract.exe'
+#pytesseract.tesseract_cmd = r'C:\Users\Isaac\Downloads\jTessBoxEditor-2.2.0\jTessBoxEditor\tesseract-ocr\tesseract.exe'
 
+writeToTestFolder = False
 
 def main():
     video = cv2.VideoCapture(0) 
@@ -103,27 +108,15 @@ def extractCircles(circles, mask, frame):
         x2 = (image_width + square_side_length) / 2
         y2 = (image_height + square_side_length) / 2
         crop_img = crop[int(y1):int(y2), int(x1):int(x2)]
-        cv2.imwrite("images/{}.jpg".format(i), crop_img)
-        imageText = processOneImage(crop_img).strip().lower()
+        
+        resized_img = cv2.resize(crop_img, (60, 60), interpolation=cv2.INTER_AREA)
+        
+        imageText = predict(resized_img)
+        #saveImage(crop_img, "d")
         tokens[imageText] = [x, y, w, h, image_width]
         
-        
-        #cv2.rectangle(original_img, (x+40,y+40), (x+(w-40),y+(h-40)), (0, 255, 0), thickness=1)
-        #cv2.imwrite("images/{}.jpg".format(i), crop_img)
-        
-        alphabet = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r']
-        
-        
-        currentIndex = 0
-        found = False
-    
-    #sortedTokens = collections.OrderedDict(sorted(tokens.items()))
-    
-    #print(next(iter(sortedTokens)))
-    #value = sortedTokens[*sortedTokens][0]
     minKey = "z"
     for key, value in tokens.items():
-        print(key)
         if (key < minKey):
             minKey = key
     
@@ -131,39 +124,35 @@ def extractCircles(circles, mask, frame):
     cv2.circle(frame,(int(value[0]+(value[2]/2)),int(value[1]+(value[3]/2))),int(value[4] / 2),(0,0,255),4)
         
     cv2.imshow("Suggested", frame)
-    #if (imageText == alphabet[currentIndex]):
-        #found = True
-        #cv2.circle(frame,(int(x+(w/2)),int(y+(h/2))),int(image_width / 2),(0,255,0),1)
-        #break
+
+    
+def saveImage(crop_img, folderName):
+    global writeToTestFolder
+    trainDataFolder = "train_data/train/" + folderName
+    testDataFolder = "train_data/test/" + folderName
+    sampleDataFolder = "train_data/sample"
+    if not os.path.exists(trainDataFolder):
+        os.mkdir(trainDataFolder)
+    if not os.path.exists(testDataFolder):
+        os.mkdir(testDataFolder)    
         
-    #else:
-        #currentIndex += 1
-        #continue
-        #cv2.imshow("Circles", frame)
-        #else:    
-            #currentIndex += 1
-            #alphabet = alphabet[currentIndex:]
+    trainFolderSize = len(os.listdir(trainDataFolder))
     
-
-def processOneImage(original_img):
-    kernel = np.ones((5, 5), np.uint8) 
-    #original_img = cv2.imread(image)
-    gray = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (9,9), 0)
-    _,th2 = cv2.threshold(blurred,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-    morphed = cv2.morphologyEx(th2, cv2.MORPH_OPEN, kernel)
-    inverted = cv2.bitwise_not(morphed)
-    #outName = "{}-out".format(str(imageName))
-    #cv2.imwrite("images/{}.jpg".format(outName), inverted)
+    print(trainFolderSize)
     
-    # Whitelist letters in the alphabet.
-    #--psm 10 means recognise 1 character.
-    text = pytesseract.image_to_string(inverted, config=("-c tessedit"
-                  "_char_whitelist=ABCDEFGHIJKLMNOPQRabcdefghijklmnopqr"
-                  " --psm 10"
-                  " -l engx"
-                  " "))  
-    return text
+    if (writeToTestFolder):
+        cv2.imwrite("{}/{}.jpg".format(testDataFolder, time.time()), crop_img)
+        writeToTestFolder = False
+    
+    elif (trainFolderSize < 350): 
+        cv2.imwrite("{}/{}.jpg".format(trainDataFolder, time.time()), crop_img)      
+        if (trainFolderSize % 10 == 0 and trainFolderSize != 0 and not writeToTestFolder):
+            writeToTestFolder = True
+        else:
+            writeToTestFolder = False
+    else:
+        if (trainFolderSize == 350):
+            cv2.imwrite("{}/{}.jpg".format(sampleDataFolder, time.time()), crop_img)    
 
-#processOneImage("0")
+
 main()
