@@ -1,10 +1,17 @@
+"""
+COSC428 Assignment Prediction Model
+Author: Isaac Worsley
+Date: 4/09/2020
+Credit: Thimira - https://gist.github.com/Thimira/354b90d59faf8b0d758f74eae3a511e2
+"""
+
+
 import numpy as np
 from keras.preprocessing.image import ImageDataGenerator, img_to_array, load_img
 from keras.models import Sequential
 from keras.layers import Dropout, Flatten, Dense
-from keras import applications
 from keras.utils.np_utils import to_categorical
-from keras.backend.tensorflow_backend import set_session
+from keras.backend.tensorflow_backend import set_session, clear_session
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import math
@@ -14,7 +21,8 @@ import os
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
-#config.log_device_placement = True  # to log device placement (on which device the operation ran)
+config.gpu_options.per_process_gpu_memory_fraction = 0.9
+config.log_device_placement = True  # to log device placement (on which device the operation ran)
 tf.get_logger().disabled = True
 sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
@@ -169,7 +177,7 @@ def predictSamples():
     print(results)
 
 
-def predict(image):
+def predict(image, modelVGG):
     image = img_to_array(image)
     image = image / 255
     image = np.expand_dims(image, axis=0)
@@ -179,8 +187,7 @@ def predict(image):
 
     num_classes = len(class_dictionary)
 
-    modelVGG = applications.VGG16(include_top=False, weights='imagenet')
-    bottleneck_prediction = modelVGG.predict(image)
+    bottleneck_prediction = modelVGG.predict_on_batch(image)
     
     # build top model
     model = Sequential()
@@ -212,8 +219,5 @@ def loadSamples():
         image = np.expand_dims(image, axis=0)
         images.append(image)
     return images
-
-
-print(predict(load_img('{}/{}'.format(sample_data_dir, "2.jpg"), target_size=(img_width, img_height))))
 
 cv2.destroyAllWindows()
