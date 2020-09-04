@@ -1,110 +1,227 @@
 """
 COSC428 Assigment 2020
 Author: Isaac Worsley
-Status: Development
+Date: 4/09/2020
 """
 
+import os
 import cv2
 import math
+import collections
 import numpy as np
-from pytesseract import *
 from PIL import Image
+import time
+from train import predict
+from keras import applications
 
-ORIGINAL_IMAGE_FOLDER = "images/original"
+showAllFrames = False
 
-pytesseract.tesseract_cmd = r'C:\Users\Isaac\Downloads\jTessBoxEditor-2.2.0\jTessBoxEditor\tesseract-ocr\tesseract.exe'
+# Change if wanting to save training images.
+saveTrainingImages = False
 
-def getCircles():
-    original_img = cv2.imread("images/tokens3.jpg")
-    original_img1 = cv2.imread("images/tokens3.jpg",0)
-    blurred_image = cv2.GaussianBlur(original_img, (9,9), 0)
-    
-    # Convert the image to grayscale for processing
-    gray_image = cv2.cvtColor(blurred_image, cv2.COLOR_BGR2GRAY)
-    cv2.imwrite("{}/blurred.jpg".format(ORIGINAL_IMAGE_FOLDER), blurred_image)
-    cv2.imwrite("{}/gray.jpg".format(ORIGINAL_IMAGE_FOLDER), gray_image)
-    
-    ## Create mask
-    height,width = original_img1.shape
-    
-    mask = np.zeros((height,width), np.uint8)    
-    loop = True
+# Determine if writing to the test folder when saving images (saveImage).
+writeToTestFolder = False
 
-    while loop:
-        
-        circles = cv2.HoughCircles(gray_image, cv2.HOUGH_GRADIENT, 1, 20, param1=100,
-                                    param2=20, minRadius=110, maxRadius=120)    
-        print(circles)
-        
-        if circles is not None:
-            circles = np.uint16(np.around(circles))
+# Image dimensions
+img_width, img_height = 60, 60
+
+# Set up the model to pass into the prediction network.
+modelVGG = applications.VGG16(include_top=False, weights='imagenet')
+
+def main():
+    """
+    The main function of the script. Runs a while loop while video is available
+    to continuously evaluate the live feed.    
+    """
+    # You may need to change the 0 to -1 depending on your camera set up.
+    video = cv2.VideoCapture(0) 
     
-            for i in circles[0,:]:
-                # Draw the circles in the mask image.
-                cv2.circle(mask,(i[0],i[1]),(i[2]-5),(255,255,255),-1)
-                #cv2.imshow("ORIGINAL", original_img)
+    # Loop video display.
+    while(video.isOpened()):
+        ret, frame = video.read()
+        copied = frame.copy()
+        blurred = cv2.GaussianBlur(frame, (9,9), 0)
+        grey = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
+        
+        # Display original, blurred and grey video feed.
+        cv2.imshow("Original", frame)
+        cv2.moveWindow("Original", 100, 100)
+        
+        if showAllFrames:
+            cv2.imshow("Blurred", blurred)
+            cv2.imshow("Grey", grey)
+            cv2.moveWindow("Blurred", 800, 100)
+            cv2.moveWindow("Grey", 1500, 100)
+        
+        getCircles(video, frame, grey)
+        
+        # Close the script when q is pressed.
+        if cv2.waitKey(1) & 0xFF == ord('q'):  
+            break 
+        
+    # Release artifacts.
+    video.release()
+    cv2.destroyAllWindows()
+
+def getCircles(video, frame, preProcessedVideo):
+    """
+    Determine the HoughCircles within the `preProcessedVideo`. Creates a mask of
+    same dimensions as the original video, and places the calculated circles on
+    the mask.
     
+    Parameters
+    ----------
+    video : numpy.ndarray
+            The live video feed.
+    frame : numpy.ndarray
+            The current video frame.
+    preProcessedVideo: numpy.ndarray
+                       The preprocessed video feed that is run through 
+                       GassianBlur and greyscale.
+    """
+    
+    height = video.get(cv2.CAP_PROP_FRAME_HEIGHT) 
+    width = video.get(cv2.CAP_PROP_FRAME_WIDTH)  
+    mask = np.zeros((int(height),int(width)), np.uint8)
+    
+    circles = cv2.HoughCircles(preProcessedVideo, cv2.HOUGH_GRADIENT, 1, 20, param1=100,
+                                        param2=40, minRadius=20, maxRadius=70)
+    if circles is not None:
+        circles = np.uint16(np.around(circles))
+
+        for i in circles[0,:]:
+            # Draw the circles in the mask image.
+            cv2.circle(mask,(i[0],i[1]),(i[2]-5),(255,255,255),-1)
         
-        masked_data = cv2.bitwise_and(original_img, original_img, mask=mask)
+        extractCircles(mask, frame)
         
-        # Apply threshold
-        _,thresh = cv2.threshold(mask,1,255,cv2.THRESH_BINARY)
+
+def extractCircles(mask, frame):
+    """
+    Determines the countours within the given frame and mask. Then iterates over
+    these contours to find the bounding rectangle for each character. Uses the 
+    predict method to determine the text within the given bounding rectangle and
+    displays the current frame, with the suggested token highlighted on screen.
+    
+    Parameters
+    ----------
+    mask : numpy.ndarray
+           Contains the inverse positioning of the circles within the frame.
+    frame : numpy.ndarray
+            The current video frame.             
+    """
+    masked_data = cv2.bitwise_and(frame, frame, mask=mask)
+    
+    # Apply threshold.
+    _,thresh = cv2.threshold(mask,1,255,cv2.THRESH_BINARY)     
+
+    # Find contours.
+    contours, _ = cv2.findContours(thresh.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    contours = np.array(contours)
+    tokens = dict()
+    
+    for i, contour in enumerate(contours, 0):
         
-        # Find contours.
-        contours, hierarchy = cv2.findContours(thresh.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
-        contours = np.array(contours)
+        x,y,w,h = cv2.boundingRect(contour)
+    
+        # Crop masked_data.
+        crop = masked_data[y:y+h,x:x+w]
         
-        # Iterate through list of contours.
+        image_width = crop.shape[1]
+        image_height = crop.shape[0]
+        square_side_length = (image_width / (math.sqrt(2)))
+        x1 = (image_width - square_side_length) / 2
+        y1 = (image_height - square_side_length) / 2
+        x2 = (image_width + square_side_length) / 2
+        y2 = (image_height + square_side_length) / 2
+        crop_img = crop[int(y1):int(y2), int(x1):int(x2)]
         
-        for i, contour in enumerate(contours, 0):
+        # Resize the image to given width and height used to train the model.
+        resized_img = cv2.resize(crop_img, (img_width, img_height), interpolation=cv2.INTER_AREA)
+        
+        # Predict what is currently in the image.
+        imageText = predict(resized_img, modelVGG)
+        
+        if saveTrainingImages: saveImage(crop_img, "d")
             
-            x,y,w,h = cv2.boundingRect(contour)
-        
-            # Crop masked_data
-            crop = masked_data[y:y+h,x:x+w]
-            
-            image_width = crop.shape[1]
-            image_height = crop.shape[0]
-            square_side_length = (image_width / (math.sqrt(2))- 10)
-            x1 = (image_width - square_side_length) / 2
-            y1 = (image_height - square_side_length) / 2
-            x2 = (image_width + square_side_length) / 2
-            y2 = (image_height + square_side_length) / 2
-            crop_img = crop[int(y1):int(y2), int(x1):int(x2)]
-            
-            #cv2.rectangle(original_img, (x+40,y+40), (x+(w-40),y+(h-40)), (0, 255, 0), thickness=1)
-            cv2.imwrite("images/{}.jpg".format(i), crop_img)
-            
-            processOneImage(i)
-
-            if (i == (len(contours) - 1)):
-                loop = False
-        #cv2.imshow("Cropped Image".format(i), original_img)
-        
-        if cv2.waitKey(100) & 0xFF == ord('q'):
-            cv2.destroyAllWindows()
-            loop = False        
+        tokens[imageText] = [x, y, w, h, image_width]
     
-
-def processOneImage(imageName):
-    kernel = np.ones((5, 5), np.uint8) 
-    original_img = cv2.imread("images/{}.jpg".format(imageName))
-    gray = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (9,9), 0)
-    _,th2 = cv2.threshold(blurred,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-    morphed = cv2.morphologyEx(th2, cv2.MORPH_OPEN, kernel)
-    inverted = cv2.bitwise_not(morphed)
-    outName = "{}-out".format(str(imageName))
-    cv2.imwrite("images/{}.jpg".format(outName), inverted)
+    targetLetter = getTargetLetter(tokens)
+    value = tokens[targetLetter]     
     
-    # Whitelist letters in the alphabet.
-    #--psm 10 means recognise 1 character.
-    text = pytesseract.image_to_string(Image.open("images/{}.jpg".format(outName)), config=("-c tessedit"
-                  "_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-                  " --psm 10"
-                  " -l engx+engxx"
-                  " "))  
-    print(outName  + " " + text)
+    # Draw a circle around the suggested target.
+    cv2.circle(frame,(int(value[0]+(value[2]/2)),int(value[1]+(value[3]/2))),int(value[4] / 2),(0,255,0),4)
+    
+    # Display suggested target token.    
+    cv2.imshow("Suggested", frame)
 
-#processOneImage("0")
-getCircles()
+
+def getTargetLetter(tokens):
+    """
+    Determines the target letter based on the given target letters.
+    
+    Parameters
+    ----------
+    tokens : dict
+             Keys are alphabetical letters, values are positions of circle. 
+             
+    Returns
+    -------
+    targetLetter : string
+                   Given the tokens, the letter that is to be highlighted.
+    """
+    targetLetter = "z"
+    
+    for key, value in tokens.items():
+        if (key < targetLetter):
+            targetLetter = key    
+    
+    return targetLetter
+    
+    
+def saveImage(img, folderName):
+    """
+    Creates an images based on the target image to train the neural network algorithm. 
+    350 of these images are placed in the trainDataFolder, every 10th image is placed
+    in the testDataFolder (resulting in 35 images). The remaining images are placed in
+    a sampleDataFolder (if exists).
+    
+    Parameters
+    ----------
+    img : numpy.ndarray
+          The image to be saved.
+    folderName : string
+                 The target directory identifier for the image.
+    """
+    
+    global writeToTestFolder
+    trainDataFolder = "train_data/train/" + folderName
+    testDataFolder = "train_data/test/" + folderName
+    sampleDataFolder = "train_data/sample"
+    if not os.path.exists(trainDataFolder):
+        os.mkdir(trainDataFolder)
+    if not os.path.exists(testDataFolder):
+        os.mkdir(testDataFolder)    
+        
+    trainFolderSize = len(os.listdir(trainDataFolder))
+    
+    # Print out the size of the training folder, in order to determine if the
+    # circles are being retrieved.
+    print(trainFolderSize)
+    
+    if (writeToTestFolder):
+        cv2.imwrite("{}/{}.jpg".format(testDataFolder, time.time()), img)
+        writeToTestFolder = False
+    
+    elif (trainFolderSize < 350): 
+        cv2.imwrite("{}/{}.jpg".format(trainDataFolder, time.time()), img)      
+        if (trainFolderSize % 10 == 0 and trainFolderSize != 0 and not writeToTestFolder):
+            writeToTestFolder = True
+        else:
+            writeToTestFolder = False
+    else:
+        if (trainFolderSize == 350):
+            cv2.imwrite("{}/{}.jpg".format(sampleDataFolder, time.time()), img)    
+
+if __name__ == "__main__":
+    main()
