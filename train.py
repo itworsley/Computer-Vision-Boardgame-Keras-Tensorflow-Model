@@ -1,7 +1,7 @@
 """
 COSC428 Assignment Prediction Model
 Author: Isaac Worsley
-Date: 4/09/2020
+Date: 4/10/2020
 Credit: Thimira - https://gist.github.com/Thimira/354b90d59faf8b0d758f74eae3a511e2
 """
 
@@ -12,6 +12,7 @@ from keras.models import Sequential
 from keras.layers import Dropout, Flatten, Dense
 from keras.utils.np_utils import to_categorical
 from keras.backend.tensorflow_backend import set_session, clear_session
+from keras import applications
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import math
@@ -22,14 +23,14 @@ import os
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
 config.gpu_options.per_process_gpu_memory_fraction = 0.9
-config.log_device_placement = True  # to log device placement (on which device the operation ran)
+config.log_device_placement = False  # to log device placement (on which device the operation ran)
 tf.get_logger().disabled = True
 sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 
 # Image dimensions
-img_width, img_height = 60, 60
+IMAGE_WIDTH, IMAGE_HEIGHT = 60, 60
 
 top_model_weights_path = 'model.h5'
 train_data_dir = 'train_data/train'
@@ -37,25 +38,25 @@ validation_data_dir = 'train_data/test'
 sample_data_dir = 'train_data/sample'
 deleted_data_dir = 'train_data/deleted'
 
-epochs = 30
-batch_size = 16
+EPOCHS = 11
+BATCH_SIZE = 32
 
-def save_bottlebeck_features():
+def save_bottleneck_features():
     model = applications.VGG16(include_top=False, weights='imagenet')
 
     datagen = ImageDataGenerator(rescale=1. / 255)
 
     generator = datagen.flow_from_directory(
         train_data_dir,
-        target_size=(img_width, img_height),
-        batch_size=batch_size,
+        target_size=(IMAGE_WIDTH, IMAGE_HEIGHT),
+        batch_size=BATCH_SIZE,
         class_mode=None,
         shuffle=False)
 
     nb_train_samples = len(generator.filenames)
     num_classes = len(generator.class_indices)
 
-    predict_size_train = int(math.ceil(nb_train_samples / batch_size))
+    predict_size_train = int(math.ceil(nb_train_samples / BATCH_SIZE))
 
     bottleneck_features_train = model.predict_generator(
         generator, predict_size_train)
@@ -64,15 +65,15 @@ def save_bottlebeck_features():
 
     generator = datagen.flow_from_directory(
         validation_data_dir,
-        target_size=(img_width, img_height),
-        batch_size=batch_size,
+        target_size=(IMAGE_WIDTH, IMAGE_HEIGHT),
+        batch_size=BATCH_SIZE,
         class_mode=None,
         shuffle=False)
 
     nb_validation_samples = len(generator.filenames)
 
     predict_size_validation = int(
-        math.ceil(nb_validation_samples / batch_size))
+        math.ceil(nb_validation_samples / BATCH_SIZE))
 
     bottleneck_features_validation = model.predict_generator(
         generator, predict_size_validation)
@@ -86,8 +87,8 @@ def train_top_model():
     
     generator_top = datagen_top.flow_from_directory(
         train_data_dir,
-        target_size=(img_width, img_height),
-        batch_size=batch_size,
+        target_size=(IMAGE_WIDTH, IMAGE_HEIGHT),
+        batch_size=BATCH_SIZE,
         class_mode='categorical',
         shuffle=False)
 
@@ -104,8 +105,8 @@ def train_top_model():
 
     generator_top = datagen_top.flow_from_directory(
         validation_data_dir,
-        target_size=(img_width, img_height),
-        batch_size=batch_size,
+        target_size=(IMAGE_WIDTH, IMAGE_HEIGHT),
+        batch_size=BATCH_SIZE,
         class_mode=None,
         shuffle=False)
 
@@ -128,26 +129,26 @@ def train_top_model():
                   loss='categorical_crossentropy', metrics=['accuracy'])
 
     history = model.fit(train_data, train_labels,
-                        epochs=epochs,
-                        batch_size=batch_size,
+                        epochs=EPOCHS,
+                        batch_size=BATCH_SIZE,
                         validation_data=(validation_data, validation_labels))
 
     model.save_weights(top_model_weights_path) 
     
     (eval_loss, eval_accuracy) = model.evaluate(
-        validation_data, validation_labels, batch_size=batch_size, verbose=1)
+        validation_data, validation_labels, batch_size=BATCH_SIZE, verbose=1)
 
     print("[INFO] accuracy: {:.2f}%".format(eval_accuracy * 100))
     print("[INFO] Loss: {}".format(eval_loss))    
     
     
-def predictSamples():
+def predict_samples():
     # load the class_indices saved in the earlier step
     class_dictionary = np.load('class_indices.npy', allow_pickle=True).item()
 
     num_classes = len(class_dictionary)
 
-    images = loadSamples()
+    images = load_samples()
     results = []
     for image in images:
         model = applications.VGG16(include_top=False, weights='imagenet')
@@ -210,10 +211,10 @@ def predict(image, modelVGG):
     
     return inv_map[inID]
 
-def loadSamples():
+def load_samples():
     images = []
     for file in os.listdir(sample_data_dir):
-        image = load_img('{}/{}'.format(sample_data_dir, file), target_size=(img_width, img_height))
+        image = load_img('{}/{}'.format(sample_data_dir, file), target_size=(IMAGE_WIDTH, IMAGE_HEIGHT))
         image = img_to_array(image)
         image = image / 255
         image = np.expand_dims(image, axis=0)
@@ -221,3 +222,8 @@ def loadSamples():
     return images
 
 cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    save_bottleneck_features()
+    train_top_model()
+    #predict_samples()

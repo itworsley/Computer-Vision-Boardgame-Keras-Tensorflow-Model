@@ -1,7 +1,7 @@
 """
 COSC428 Assigment 2020
 Author: Isaac Worsley
-Date: 4/09/2020
+Date: 4/10/2020
 """
 
 import os
@@ -13,20 +13,25 @@ from PIL import Image
 import time
 from train import predict
 from keras import applications
+from keras.models import Sequential
+from keras.layers import Dropout, Flatten, Dense
+import time
 
-showAllFrames = False
+
+# Whether or not to show popup windows containing preprocessing video frames.
+SHOW_ALL_FRAMES = False
 
 # Change if wanting to save training images.
-saveTrainingImages = False
+SAVE_TRAINING_IMAGES = False
 
-# Determine if writing to the test folder when saving images (saveImage).
-writeToTestFolder = False
+# Determine if writing to the test folder when saving images (save_image).
+WRITE_TO_TEST_FOLDER = False
 
 # Image dimensions
-img_width, img_height = 60, 60
+IMAGE_WIDTH, IMAGE_HEIGHT = 60, 60
 
 # Set up the model to pass into the prediction network.
-modelVGG = applications.VGG16(include_top=False, weights='imagenet')
+MODEL_VGG = applications.VGG16(include_top=False, weights='imagenet')
 
 def main():
     """
@@ -35,6 +40,10 @@ def main():
     """
     # You may need to change the 0 to -1 depending on your camera set up.
     video = cv2.VideoCapture(0) 
+    
+    start_time = time.time()
+    x = 1 # displays the frame rate every 1 second
+    counter = 0    
     
     # Loop video display.
     while(video.isOpened()):
@@ -47,23 +56,29 @@ def main():
         cv2.imshow("Original", frame)
         cv2.moveWindow("Original", 100, 100)
         
-        if showAllFrames:
+        if SHOW_ALL_FRAMES:
             cv2.imshow("Blurred", blurred)
             cv2.imshow("Grey", grey)
             cv2.moveWindow("Blurred", 800, 100)
             cv2.moveWindow("Grey", 1500, 100)
         
-        getCircles(video, frame, grey)
+        get_circles(video, frame, grey) 
         
         # Close the script when q is pressed.
         if cv2.waitKey(1) & 0xFF == ord('q'):  
             break 
         
+        counter+=1
+        if (time.time() - start_time) > x :
+            print("FPS: ", counter / (time.time() - start_time))
+            counter = 0
+            start_time = time.time()        
+          
     # Release artifacts.
     video.release()
     cv2.destroyAllWindows()
 
-def getCircles(video, frame, preProcessedVideo):
+def get_circles(video, frame, preProcessedVideo):
     """
     Determine the HoughCircles within the `preProcessedVideo`. Creates a mask of
     same dimensions as the original video, and places the calculated circles on
@@ -93,10 +108,9 @@ def getCircles(video, frame, preProcessedVideo):
             # Draw the circles in the mask image.
             cv2.circle(mask,(i[0],i[1]),(i[2]-5),(255,255,255),-1)
         
-        extractCircles(mask, frame)
-        
+        extract_circles(mask, frame)
 
-def extractCircles(mask, frame):
+def extract_circles(mask, frame):
     """
     Determines the countours within the given frame and mask. Then iterates over
     these contours to find the bounding rectangle for each character. Uses the 
@@ -110,13 +124,16 @@ def extractCircles(mask, frame):
     frame : numpy.ndarray
             The current video frame.             
     """
+    # Join mask and original frame.
     masked_data = cv2.bitwise_and(frame, frame, mask=mask)
+
     
-    # Apply threshold.
-    _,thresh = cv2.threshold(mask,1,255,cv2.THRESH_BINARY)     
+    if SHOW_ALL_FRAMES:
+        cv2.imshow("Joined", masked_data)
+        cv2.moveWindow("Joined", 100, 800) 
 
     # Find contours.
-    contours, _ = cv2.findContours(thresh.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(mask.copy(),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
     contours = np.array(contours)
     tokens = dict()
     
@@ -134,29 +151,46 @@ def extractCircles(mask, frame):
         y1 = (image_height - square_side_length) / 2
         x2 = (image_width + square_side_length) / 2
         y2 = (image_height + square_side_length) / 2
-        crop_img = crop[int(y1):int(y2), int(x1):int(x2)]
+        crop_img = crop[int(y1):int(y2), int(x1):int(x2)]               
         
         # Resize the image to given width and height used to train the model.
-        resized_img = cv2.resize(crop_img, (img_width, img_height), interpolation=cv2.INTER_AREA)
+        resized_img = cv2.resize(crop_img, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_AREA)
+        
+        if SAVE_TRAINING_IMAGES: save_image(crop_img, "r")
+        
         
         # Predict what is currently in the image.
-        imageText = predict(resized_img, modelVGG)
+        imageText = predict(resized_img, MODEL_VGG)
         
-        if saveTrainingImages: saveImage(crop_img, "d")
             
         tokens[imageText] = [x, y, w, h, image_width]
     
-    targetLetter = getTargetLetter(tokens)
+    targetLetter = get_target_letter(tokens)
     value = tokens[targetLetter]     
     
     # Draw a circle around the suggested target.
     cv2.circle(frame,(int(value[0]+(value[2]/2)),int(value[1]+(value[3]/2))),int(value[4] / 2),(0,255,0),4)
     
-    # Display suggested target token.    
+    ## Display suggested target token.    
     cv2.imshow("Suggested", frame)
 
 
-def getTargetLetter(tokens):
+def validate_images():
+    """
+    Used to check that the images in the validate directory are detected 
+    correctly. Results are written to a .txt file.
+    """
+    file1 = open("validate/letters.txt","a") 
+    
+    for i in range(0, 18):
+        original_img = cv2.imread("validate/{}.jpg".format(i))
+        resized_img = cv2.resize(original_img, (IMAGE_WIDTH, IMAGE_HEIGHT), interpolation=cv2.INTER_AREA)
+        cv2.imwrite("validate/{}_resize.jpg".format(i), resized_img)
+        file1.write(predict(resized_img, MODEL_VGG) + "\n")
+    
+    file1.close()       
+
+def get_target_letter(tokens):
     """
     Determines the target letter based on the given target letters.
     
@@ -179,7 +213,7 @@ def getTargetLetter(tokens):
     return targetLetter
     
     
-def saveImage(img, folderName):
+def save_image(img, folderName):
     """
     Creates an images based on the target image to train the neural network algorithm. 
     350 of these images are placed in the trainDataFolder, every 10th image is placed
@@ -194,7 +228,7 @@ def saveImage(img, folderName):
                  The target directory identifier for the image.
     """
     
-    global writeToTestFolder
+    global WRITE_TO_TEST_FOLDER
     trainDataFolder = "train_data/train/" + folderName
     testDataFolder = "train_data/test/" + folderName
     sampleDataFolder = "train_data/sample"
@@ -204,24 +238,29 @@ def saveImage(img, folderName):
         os.mkdir(testDataFolder)    
         
     trainFolderSize = len(os.listdir(trainDataFolder))
+    testFolderSize = len(os.listdir(testDataFolder))
     
     # Print out the size of the training folder, in order to determine if the
     # circles are being retrieved.
     print(trainFolderSize)
     
-    if (writeToTestFolder):
+    if (WRITE_TO_TEST_FOLDER):
         cv2.imwrite("{}/{}.jpg".format(testDataFolder, time.time()), img)
-        writeToTestFolder = False
+        WRITE_TO_TEST_FOLDER = False
     
     elif (trainFolderSize < 350): 
         cv2.imwrite("{}/{}.jpg".format(trainDataFolder, time.time()), img)      
-        if (trainFolderSize % 10 == 0 and trainFolderSize != 0 and not writeToTestFolder):
-            writeToTestFolder = True
+        if (trainFolderSize % 10 == 0 and trainFolderSize != 0 and not WRITE_TO_TEST_FOLDER):
+            WRITE_TO_TEST_FOLDER = True
         else:
-            writeToTestFolder = False
+            WRITE_TO_TEST_FOLDER = False
     else:
-        if (trainFolderSize == 350):
-            cv2.imwrite("{}/{}.jpg".format(sampleDataFolder, time.time()), img)    
+        if (testFolderSize < 35):
+            cv2.imwrite("{}/{}.jpg".format(testDataFolder, time.time()), img)          
+        elif (trainFolderSize == 350):
+            cv2.imwrite("{}/{}.jpg".format(sampleDataFolder, time.time()), img)  
+
 
 if __name__ == "__main__":
+    
     main()
