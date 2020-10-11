@@ -1,3 +1,22 @@
+# Introduction
+`project.py` contains the various OpenCV algorithms to handle the live video feed and uses the
+`train.py` file to predict the tokens using the `model.h5` training model.
+
+When training the model, `bottleneck_features_train.npy`, `bottleneck_features_validation.npy` and `class_indices.npy` are all generated and required to be able to run the prediction algorithm.
+
+To be able to train the model, the directory should be constructed as the following:
+```
+.
+├── train_data
+    ├── test
+    ├── train
+    └── sample
+├── project.py                   
+├── train.py
+└── README.md
+```
+
+You can then generate your own version of the `model.h5` file by running the `train.py` script. The application is then able to run `project.py`.
 # Miniconda Environment Breakdown
 Create your environment in Miniconda using the *Anaconda Prompt* and typing `conda create --name YOUR_ENV_NAME`.  
 Then activate the environment using `conda activate YOUR_ENV_NAME`. You should then be able to install any of the packages in the [Python Packages](#python-packages) section.

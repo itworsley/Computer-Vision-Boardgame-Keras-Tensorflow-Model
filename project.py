@@ -21,6 +21,9 @@ import time
 # Whether or not to show popup windows containing preprocessing video frames.
 SHOW_ALL_FRAMES = False
 
+# Log current framerate of the video feed
+SHOW_FRAME_RATE = False
+
 # Change if wanting to save training images.
 SAVE_TRAINING_IMAGES = False
 
@@ -68,11 +71,12 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'):  
             break 
         
-        counter+=1
-        if (time.time() - start_time) > x :
-            print("FPS: ", counter / (time.time() - start_time))
-            counter = 0
-            start_time = time.time()        
+        if (SHOW_FRAME_RATE):
+            counter+=1
+            if (time.time() - start_time) > x :
+                print("FPS: ", counter / (time.time() - start_time))
+                counter = 0
+                start_time = time.time()        
           
     # Release artifacts.
     video.release()
